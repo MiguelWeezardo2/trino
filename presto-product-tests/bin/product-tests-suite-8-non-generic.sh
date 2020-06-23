@@ -11,11 +11,18 @@ if test -v HADOOP_BASE_IMAGE; then
 fi
 
 suite_exit_code=0
+loop=1
 
-TESTS_HIVE_VERSION_MAJOR="3" TESTS_HIVE_VERSION_MINOR="1" presto-product-tests-launcher/bin/run-launcher test run \
-   --environment singlenode-hdp3 \
-    -- -g hdp3_only,storage_formats,hive_transactional \
-    || suite_exit_code=1
+while [ $suite_exit_code -eq 0 ]
+do
+    echo "Test iteration: ${loop}"
+    TESTS_HIVE_VERSION_MAJOR="3" TESTS_HIVE_VERSION_MINOR="1" presto-product-tests-launcher/bin/run-launcher test run \
+       --environment singlenode-hdp3 \
+        -- -g hdp3_only,storage_formats,hive_transactional \
+        || suite_exit_code=1
+    echo "suite_exit_code: ${suite_exit_code}"
+    loop=$(( ${loop} + 1 ))
+done
 
 echo "$0: exiting with ${suite_exit_code}"
 exit "${suite_exit_code}"
