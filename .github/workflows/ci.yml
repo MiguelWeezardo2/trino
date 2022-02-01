@@ -483,6 +483,62 @@ jobs:
             **/surefire-reports/TEST-*.xml
           retention-days: ${{ env.TEST_REPORT_RETENTION_DAYS }}
 
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # checkout all commits to be able to determine merge base for GIB
+      - name: Fetch base ref to find merge-base for GIB
+        run: |
+          [ "$GITHUB_REF_NAME" != master ] && git fetch --no-tags --prune --progress --no-recurse-submodules origin "$GITHUB_BASE_REF"
+      - uses: actions/setup-java@v2
+        with:
+          distribution: 'zulu'
+          java-version: 11
+          cache: 'maven'
+      - name: Maven Install
+        run: |
+          export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
+          # GIB needs to be explicitly disabled, because the gib profile enables it, but the trino-server module requires all of its dependencies to be built
+          $RETRY $MAVEN install ${MAVEN_FAST_INSTALL} -Dgib.disable -pl '!:trino-docs,!:trino-server-rpm'
+      - name: Map impacted plugins to connectors
+        run: |
+          export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
+          $MAVEN validate ${MAVEN_FAST_INSTALL} -pl '!:trino-docs,!:trino-server-rpm'
+          testing/trino-plugin-reader/target/trino-plugin-reader-*-executable.jar -i gib-impacted.log -p core/trino-server/target/trino-server-*-hardlinks/plugin > impacted-connectors.log
+          echo "Impacted connectors:"
+          cat impacted-connectors.log
+      - name: Server artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: server tarball
+          path: |
+            core/trino-server/target/*.tar.gz
+            impacted-connectors.log
+          retention-days: 1
+      - name: Product tests launcher artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: product tests launcher
+          path: |
+            testing/trino-product-tests-launcher/target/*.jar
+          retention-days: 1
+      - name: Product tests artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: product tests
+          path: |
+            testing/trino-product-tests/target/*.jar
+          retention-days: 1
+      - name: Client artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: client
+          path: |
+            client/trino-cli/target/*.jar
+          retention-days: 1
+
   pt:
     runs-on: ubuntu-latest
     # explicitly define the name to avoid adding the value of the `ignore exclusion if` matrix item
@@ -572,30 +628,39 @@ jobs:
             jdk: 17
     # PT Launcher's timeout defaults to 2h, account for preparation steps (compilation) and add some margin
     timeout-minutes: 140
+    needs: build
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-java@v2
         with:
           distribution: 'zulu'
           java-version: 11
-          cache: 'maven'
-      - name: Maven Install
+      - name: Server artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: server tarball
+      - name: Product tests launcher artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: product tests launcher
+          path: testing/trino-product-tests-launcher/target
+      - name: Product tests artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: product tests
+          path: testing/trino-product-tests/target
+      - name: Client artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: client
+          path: client/trino-cli/target
+      - name: Fix artifact permissions
         run: |
-          export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
-          # GIB needs to be explicitly disabled, because the gib profile enables it, but the trino-server module requires all of its dependencies to be built
-          $RETRY $MAVEN install ${MAVEN_FAST_INSTALL} -Dgib.disable -pl '!:trino-docs,!:trino-server-rpm'
-      - name: Map impacted plugins to connectors
+          find . -type f -name \*-executable.jar -exec chmod 0777 {} \;
+      - name: Read impacted connectors
         run: |
-          export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
-          $MAVEN validate ${MAVEN_FAST_INSTALL} -pl '!:trino-docs,!:trino-server-rpm'
-          connectors=$(testing/trino-plugin-reader/target/trino-plugin-reader-*-executable.jar -i gib-impacted.log -p core/trino-server/target/trino-server-*-hardlinks/plugin | tr '\n' ',' | sed 's/,*$//g')
-          echo "Impacted connectors: $connectors"
+          connectors=$(tr '\n' ',' < impacted-connectors.log | sed 's/,*$//'g)
           echo "IMPACTED_CONNECTORS=$connectors" >> $GITHUB_ENV
-      - name: Free Disk Space
-        run: |
-          docker image prune -af
-          sudo apt-get clean
-          rm -rf ~/.m2/repository
       - name: Product Tests
         run: |
           testing/bin/ptl suite run \
