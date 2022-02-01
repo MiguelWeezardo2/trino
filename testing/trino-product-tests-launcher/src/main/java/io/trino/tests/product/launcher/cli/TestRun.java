@@ -119,6 +119,9 @@ public final class TestRun
         @Option(names = "--option", paramLabel = "<option>", description = "Extra options to provide to environment (property can be used multiple times; format is key=value)")
         public Map<String, String> extraOptions = new HashMap<>();
 
+        @Option(names = "--impacted-features", paramLabel = "<txt>", description = "Skip tests not using these features " + DEFAULT_VALUE, split = ",")
+        public List<String> impactedFeatures = List.of();
+
         @Option(names = "--attach", description = "attach to an existing environment")
         public boolean attach;
 
@@ -166,6 +169,9 @@ public final class TestRun
         private final Optional<Path> logsDirBase;
         private final EnvironmentConfig environmentConfig;
         private final Map<String, String> extraOptions;
+        private final List<String> impactedFeatures;
+
+        public static final Integer ENVIRONMENT_SKIPPED_EXIT_CODE = 98;
 
         @Inject
         public Execution(EnvironmentFactory environmentFactory, EnvironmentOptions environmentOptions, EnvironmentConfig environmentConfig, TestRunOptions testRunOptions)
@@ -187,6 +193,7 @@ public final class TestRun
             this.logsDirBase = requireNonNull(testRunOptions.logsDirBase, "testRunOptions.logsDirBase is empty");
             this.environmentConfig = requireNonNull(environmentConfig, "environmentConfig is null");
             this.extraOptions = ImmutableMap.copyOf(requireNonNull(testRunOptions.extraOptions, "testRunOptions.extraOptions is null"));
+            this.impactedFeatures = ImmutableList.copyOf(requireNonNull(testRunOptions.impactedFeatures, "testRunOptions.impactedFeatures is null"));
         }
 
         @Override
@@ -219,8 +226,14 @@ public final class TestRun
 
         private Integer tryExecuteTests()
         {
-            try (Environment environment = startEnvironment()) {
-                return toIntExact(environment.awaitTestsCompletion());
+            Environment environment = getEnvironment();
+            List<String> configuredConnectors = environment.getConfiguredConnectors();
+            if (impactedFeatures.size() != 0 && configuredConnectors.size() != 0 && configuredConnectors.stream().noneMatch(impactedFeatures::contains)) {
+                log.warn("Skipping test due to impacted features %s not overlapping with features %s configured in environment", impactedFeatures, environment.getConfiguredConnectors());
+                return toIntExact(ENVIRONMENT_SKIPPED_EXIT_CODE);
+            }
+            try (Environment runningEnvironment = startEnvironment(environment)) {
+                return toIntExact(runningEnvironment.awaitTestsCompletion());
             }
             catch (RuntimeException e) {
                 log.warn(e, "Failed to execute tests");
@@ -228,10 +241,8 @@ public final class TestRun
             }
         }
 
-        private Environment startEnvironment()
+        private Environment startEnvironment(Environment environment)
         {
-            Environment environment = getEnvironment();
-
             Collection<DockerContainer> allContainers = environment.getContainers();
             DockerContainer testsContainer = environment.getContainer(TESTS);
 
@@ -275,7 +286,6 @@ public final class TestRun
                 if (System.getenv("CONTINUOUS_INTEGRATION") != null) {
                     container.withEnv("CONTINUOUS_INTEGRATION", "true");
                 }
-
                 container
                         // the test jar is hundreds MB and file system bind is much more efficient
                         .withFileSystemBind(testJar.getPath(), "/docker/test.jar", READ_ONLY)
