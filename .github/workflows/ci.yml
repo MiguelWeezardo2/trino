@@ -584,6 +584,13 @@ jobs:
           export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
           # GIB needs to be explicitly disabled, because the gib profile enables it, but the trino-server module requires all of its dependencies to be built
           $RETRY $MAVEN install ${MAVEN_FAST_INSTALL} -Dgib.disable -pl '!:trino-docs,!:trino-server-rpm'
+      - name: Map impacted plugins to connectors
+        run: |
+          export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
+          $MAVEN validate ${MAVEN_FAST_INSTALL} -pl '!:trino-docs,!:trino-server-rpm'
+          connectors=$(testing/trino-plugin-reader/target/trino-plugin-reader-*-executable.jar -i gib-impacted.log -p core/trino-server/target/trino-server-*-hardlinks/plugin | tr '\n' ',' | sed 's/,*$//g')
+          echo "Impacted connectors: $connectors"
+          echo "IMPACTED_CONNECTORS=$connectors" >> $GITHUB_ENV
       - name: Free Disk Space
         run: |
           docker image prune -af
@@ -592,7 +599,10 @@ jobs:
       - name: Product Tests
         run: |
           testing/bin/ptl suite run \
-            --suite ${{ matrix.suite }} --config config-${{ matrix.config }} --bind=off --logs-dir logs/ --timeout 2h \
+            --suite ${{ matrix.suite }} \
+            --config config-${{ matrix.config }} \
+            --impacted-features ${{ env.IMPACTED_CONNECTORS }} \
+            --bind=off --logs-dir logs/ --timeout 2h \
             --trino-jdk-version zulu_${{ matrix.jdk }}
       - name: Upload test logs and results
         uses: actions/upload-artifact@v2
