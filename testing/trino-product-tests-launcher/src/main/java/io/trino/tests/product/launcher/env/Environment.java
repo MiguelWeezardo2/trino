@@ -67,8 +67,8 @@ import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
 import static io.trino.tests.product.launcher.env.DockerContainer.ensurePathExists;
-import static io.trino.tests.product.launcher.env.EnvironmentContainers.COORDINATOR;
 import static io.trino.tests.product.launcher.env.EnvironmentContainers.TESTS;
+import static io.trino.tests.product.launcher.env.EnvironmentContainers.isPrestoContainer;
 import static io.trino.tests.product.launcher.env.Environments.pruneEnvironment;
 import static io.trino.tests.product.launcher.env.common.Standard.CONTAINER_PRESTO_ETC;
 import static java.lang.String.format;
@@ -428,8 +428,11 @@ public final class Environment
         {
             requireNonNull(catalogConfig, "catalogConfig is null");
             requireNonNull(containerPath, "containerPath is null");
-            configureContainer(COORDINATOR, container -> container
-                    .withCopyFileToContainer(catalogConfig, containerPath));
+            configureContainers(container -> {
+                if (isPrestoContainer(container.getLogicalName())) {
+                    container.withCopyFileToContainer(catalogConfig, containerPath);
+                }
+            });
             return addConnector(connectorName);
         }
 
