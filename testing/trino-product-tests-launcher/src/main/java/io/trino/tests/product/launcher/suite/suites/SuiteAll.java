@@ -31,7 +31,7 @@ public class SuiteAll
     {
         return ImmutableList.of(
                 testOnEnvironment(EnvMultinodeAllConnectors.class)
-                        .withTests("TestConfiguredConnectors.selectConfiguredConnectors")
+                        .withTests("TestConfiguredFeatures.selectConfiguredConnectors")
                         .build());
     }
 }

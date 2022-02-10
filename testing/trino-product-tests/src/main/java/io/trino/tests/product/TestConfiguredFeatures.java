@@ -28,12 +28,16 @@ import static io.trino.tests.product.TestGroups.CONFIGURED_FEATURES;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.sql.JDBCType.VARCHAR;
 
-public class TestConfiguredConnectors
+public class TestConfiguredFeatures
         extends ProductTest
 {
     @Inject
     @Named("databases.presto.configured_connectors")
     private List<String> configuredConnectors;
+
+    @Inject
+    @Named("databases.presto.configured_password_authenticators")
+    private List<String> configuredPasswordAuthenticators;
 
     @Test(groups = CONFIGURED_FEATURES)
     public void selectConfiguredConnectors()

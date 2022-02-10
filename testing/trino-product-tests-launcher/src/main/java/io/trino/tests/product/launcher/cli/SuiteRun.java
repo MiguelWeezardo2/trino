@@ -126,8 +126,8 @@ public class SuiteRun
         @Option(names = "--cli-executable", paramLabel = "<jar>", description = "Path to CLI executable " + DEFAULT_VALUE, defaultValue = "${cli.bin}")
         public File cliJar;
 
-        @Option(names = "--impacted-features", paramLabel = "<txt>", description = "Skip tests not using these features " + DEFAULT_VALUE, split = ",")
-        public List<String> impactedFeatures = List.of();
+        @Option(names = "--impacted-features", paramLabel = "<file>", description = "Skip tests not using these features " + DEFAULT_VALUE)
+        public Optional<File> impactedFeatures;
 
         @Option(names = "--logs-dir", paramLabel = "<dir>", description = "Location of the exported logs directory " + DEFAULT_VALUE)
         public Optional<Path> logsDirBase;

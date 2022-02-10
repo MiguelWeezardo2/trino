@@ -502,20 +502,20 @@ jobs:
           export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
           # GIB needs to be explicitly disabled, because the gib profile enables it, but the trino-server module requires all of its dependencies to be built
           $RETRY $MAVEN install ${MAVEN_FAST_INSTALL} -Dgib.disable -pl '!:trino-docs,!:trino-server-rpm'
-      - name: Map impacted plugins to connectors
+      - name: Map impacted plugins to features
         run: |
           export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
           $MAVEN validate ${MAVEN_FAST_INSTALL} -pl '!:trino-docs,!:trino-server-rpm'
-          testing/trino-plugin-reader/target/trino-plugin-reader-*-executable.jar -i gib-impacted.log -p core/trino-server/target/trino-server-*-hardlinks/plugin > impacted-connectors.log
-          echo "Impacted connectors:"
-          cat impacted-connectors.log
+          testing/trino-plugin-reader/target/trino-plugin-reader-*-executable.jar -i gib-impacted.log -p core/trino-server/target/trino-server-*-hardlinks/plugin > impacted-features.log
+          echo "Impacted plugin features:"
+          cat impacted-features.log
       - name: Server artifact
         uses: actions/upload-artifact@v2
         with:
           name: server tarball
           path: |
             core/trino-server/target/*.tar.gz
-            impacted-connectors.log
+            impacted-features.log
           retention-days: 1
       - name: Product tests launcher artifact
         uses: actions/upload-artifact@v2
@@ -661,16 +661,12 @@ jobs:
       - name: Fix artifact permissions
         run: |
           find . -type f -name \*-executable.jar -exec chmod 0777 {} \;
-      - name: Read impacted connectors
-        run: |
-          connectors=$(tr '\n' ',' < impacted-connectors.log | sed 's/,*$//'g)
-          echo "IMPACTED_CONNECTORS=$connectors" >> $GITHUB_ENV
       - name: Product Tests
         run: |
           testing/bin/ptl suite run \
             --suite ${{ matrix.suite }} \
             --config config-${{ matrix.config }} \
-            --impacted-features ${{ env.IMPACTED_CONNECTORS }} \
+            --impacted-features impacted-features.log \
             --bind=off --logs-dir logs/ --timeout 2h \
             --trino-jdk-version zulu_${{ matrix.jdk }}
       - name: Upload test logs and results

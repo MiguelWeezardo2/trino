@@ -16,6 +16,7 @@ package io.trino.tests.product.launcher.cli;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.io.Files;
 import com.google.inject.Module;
 import io.airlift.log.Logger;
 import io.airlift.units.Duration;
@@ -39,6 +40,8 @@ import picocli.CommandLine.Parameters;
 import javax.inject.Inject;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -47,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.collect.ImmutableList.toImmutableList;
@@ -119,8 +123,8 @@ public final class TestRun
         @Option(names = "--option", paramLabel = "<option>", description = "Extra options to provide to environment (property can be used multiple times; format is key=value)")
         public Map<String, String> extraOptions = new HashMap<>();
 
-        @Option(names = "--impacted-features", paramLabel = "<txt>", description = "Skip tests not using these features " + DEFAULT_VALUE, split = ",")
-        public List<String> impactedFeatures = List.of();
+        @Option(names = "--impacted-features", paramLabel = "<file>", description = "Skip tests not using these features " + DEFAULT_VALUE)
+        public Optional<File> impactedFeatures;
 
         @Option(names = "--attach", description = "attach to an existing environment")
         public boolean attach;
@@ -193,7 +197,18 @@ public final class TestRun
             this.logsDirBase = requireNonNull(testRunOptions.logsDirBase, "testRunOptions.logsDirBase is empty");
             this.environmentConfig = requireNonNull(environmentConfig, "environmentConfig is null");
             this.extraOptions = ImmutableMap.copyOf(requireNonNull(testRunOptions.extraOptions, "testRunOptions.extraOptions is null"));
-            this.impactedFeatures = ImmutableList.copyOf(requireNonNull(testRunOptions.impactedFeatures, "testRunOptions.impactedFeatures is null"));
+            Optional<File> impactedFeaturesFile = requireNonNull(testRunOptions.impactedFeatures, "testRunOptions.impactedFeatures is null");
+            if (impactedFeaturesFile.isPresent()) {
+                try {
+                    this.impactedFeatures = Files.asCharSource(impactedFeaturesFile.get(), StandardCharsets.UTF_8).readLines();
+                }
+                catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            else {
+                this.impactedFeatures = List.of();
+            }
         }
 
         @Override
@@ -227,10 +242,29 @@ public final class TestRun
         private Integer tryExecuteTests()
         {
             Environment environment = getEnvironment();
-            List<String> configuredConnectors = environment.getConfiguredConnectors();
-            if (impactedFeatures.size() != 0 && configuredConnectors.size() != 0 && configuredConnectors.stream().noneMatch(impactedFeatures::contains)) {
-                log.warn("Skipping test due to impacted features %s not overlapping with features %s configured in environment", impactedFeatures, environment.getConfiguredConnectors());
-                return toIntExact(ENVIRONMENT_SKIPPED_EXIT_CODE);
+            if (impactedFeatures.size() != 0) {
+                // all possible feature prefixes:
+                // connector, blockEncoding, type, parametricType, function, systemAccessControl, groupProvider,
+                // passwordAuthenticator, headerAuthenticator, certificateAuthenticator
+                // eventListener, resourceGroupConfigurationManager, sessionPropertyConfigurationManager, exchangeManager
+                boolean noneImpacted = true;
+                List<String> impactedConnectors = impactedFeatures.stream()
+                        .filter(feature -> feature.startsWith("connector:"))
+                        .collect(Collectors.toList());
+                if (impactedConnectors.size() == 0 || environment.getConfiguredConnectors().stream().anyMatch(impactedConnectors::contains)) {
+                    noneImpacted = false;
+                }
+                List<String> impactedPasswordAuthenticators = impactedFeatures.stream()
+                        .filter(feature -> feature.startsWith("passwordAuthenticator:"))
+                        .collect(Collectors.toList());
+                if (impactedPasswordAuthenticators.size() == 0 || environment.getConfiguredPasswordAuthenticators().stream().anyMatch(impactedPasswordAuthenticators::contains)) {
+                    noneImpacted = false;
+                }
+                if (noneImpacted) {
+                    log.warn("Skipping test due to impacted features %s not overlapping with connectors %s or password authenticators %s configured in environment",
+                            impactedFeatures, environment.getConfiguredConnectors(), environment.getConfiguredPasswordAuthenticators());
+                    return toIntExact(ENVIRONMENT_SKIPPED_EXIT_CODE);
+                }
             }
             try (Environment runningEnvironment = startEnvironment(environment)) {
                 return toIntExact(runningEnvironment.awaitTestsCompletion());

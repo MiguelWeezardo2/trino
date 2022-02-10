@@ -67,6 +67,7 @@ import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
 import static io.trino.tests.product.launcher.env.DockerContainer.ensurePathExists;
+import static io.trino.tests.product.launcher.env.EnvironmentContainers.COORDINATOR;
 import static io.trino.tests.product.launcher.env.EnvironmentContainers.TESTS;
 import static io.trino.tests.product.launcher.env.EnvironmentContainers.isPrestoContainer;
 import static io.trino.tests.product.launcher.env.Environments.pruneEnvironment;
@@ -96,6 +97,7 @@ public final class Environment
     private final Optional<EnvironmentListener> listener;
     private final boolean attached;
     private final List<String> configuredConnectors;
+    private final List<String> configuredPasswordAuthenticators;
 
     private Environment(
             String name,
@@ -103,7 +105,8 @@ public final class Environment
             Map<String, DockerContainer> containers,
             Optional<EnvironmentListener> listener,
             boolean attached,
-            List<String> configuredConnectors)
+            List<String> configuredConnectors,
+            List<String> configuredPasswordAuthenticators)
     {
         this.name = requireNonNull(name, "name is null");
         this.startupRetries = startupRetries;
@@ -111,6 +114,7 @@ public final class Environment
         this.listener = requireNonNull(listener, "listener is null");
         this.attached = attached;
         this.configuredConnectors = requireNonNull(configuredConnectors, "configuredConnectors is null");
+        this.configuredPasswordAuthenticators = requireNonNull(configuredPasswordAuthenticators, "configuredPasswordAuthenticators is null");
     }
 
     public Environment start()
@@ -276,6 +280,11 @@ public final class Environment
         return configuredConnectors;
     }
 
+    public List<String> getConfiguredPasswordAuthenticators()
+    {
+        return configuredPasswordAuthenticators;
+    }
+
     @Override
     public String toString()
     {
@@ -356,6 +365,7 @@ public final class Environment
         private Optional<Path> logsBaseDir = Optional.empty();
         private boolean attached;
         private Set<String> configuredConnectors = new HashSet<>();
+        private Set<String> configuredPasswordAuthenticators = new HashSet<>();
 
         public Builder(String name)
         {
@@ -417,23 +427,46 @@ public final class Environment
             return this;
         }
 
-        public Builder addConnector(String connectorName, MountableFile catalogConfig)
+        public Builder addConnector(String connectorName, MountableFile configFile)
         {
             requireNonNull(connectorName, "connectorName is null");
-            requireNonNull(catalogConfig, "catalogConfig is null");
-            return addConnector(connectorName, catalogConfig, CONTAINER_PRESTO_ETC + "/catalog/" + connectorName + ".properties");
+            requireNonNull(configFile, "configFile is null");
+            return addConnector(connectorName, configFile, CONTAINER_PRESTO_ETC + "/catalog/" + connectorName + ".properties");
         }
 
-        public Builder addConnector(String connectorName, MountableFile catalogConfig, String containerPath)
+        public Builder addConnector(String connectorName, MountableFile configFile, String containerPath)
         {
-            requireNonNull(catalogConfig, "catalogConfig is null");
+            requireNonNull(configFile, "configFile is null");
             requireNonNull(containerPath, "containerPath is null");
             configureContainers(container -> {
                 if (isPrestoContainer(container.getLogicalName())) {
-                    container.withCopyFileToContainer(catalogConfig, containerPath);
+                    container.withCopyFileToContainer(configFile, containerPath);
                 }
             });
             return addConnector(connectorName);
+        }
+
+        public Builder addPasswordAuthenticator(String name)
+        {
+            requireNonNull(name, "name is null");
+            checkState(name.length() != 0, "Cannot register empty string as a password authenticator in an Environment");
+            configuredPasswordAuthenticators.add(name);
+            return this;
+        }
+
+        public Builder addPasswordAuthenticator(String name, MountableFile configFile)
+        {
+            requireNonNull(name, "name is null");
+            requireNonNull(configFile, "configFile is null");
+            return addPasswordAuthenticator(name, configFile, CONTAINER_PRESTO_ETC + "/password-authenticator.properties");
+        }
+
+        public Builder addPasswordAuthenticator(String name, MountableFile configFile, String containerPath)
+        {
+            requireNonNull(configFile, "catalogConfig is null");
+            requireNonNull(containerPath, "containerPath is null");
+            configureContainer(COORDINATOR, container -> container.withCopyFileToContainer(configFile, containerPath));
+            return addPasswordAuthenticator(name);
         }
 
         private static void updateContainerHostConfig(CreateContainerCmd createContainerCmd)
@@ -564,9 +597,16 @@ public final class Environment
                         });
             });
 
-            enableConfiguredConnectorsTest();
+            addConfiguredFeaturesConfig();
 
-            return new Environment(name, startupRetries, containers, listener, attached, new ArrayList<>(configuredConnectors));
+            return new Environment(
+                    name,
+                    startupRetries,
+                    containers,
+                    listener,
+                    attached,
+                    new ArrayList<>(configuredConnectors),
+                    new ArrayList<>(configuredPasswordAuthenticators));
         }
 
         private static Consumer<OutputFrame> writeContainerLogs(DockerContainer container, Path path)
@@ -602,18 +642,18 @@ public final class Environment
             return outputFrame -> {};
         }
 
-        private void enableConfiguredConnectorsTest()
+        private void addConfiguredFeaturesConfig()
         {
             if (!containers.containsKey(TESTS)) {
                 return;
             }
             DockerContainer testContainer = containers.get(TESTS);
-            // make sure to always run TestConfiguredConnectors
             // write a custom tempto config with list of connectors the environment declares to have configured
+            // since it's needed in TestConfiguredFeatures
             ObjectMapper objectMapper = new ObjectMapper(new YAMLFactory());
             File tempFile;
             try {
-                tempFile = File.createTempFile("tempto-configured-connectors-", ".yaml");
+                tempFile = File.createTempFile("tempto-configured-features-", ".yaml");
                 objectMapper.writeValue(
                         tempFile,
                         Map.of(
@@ -621,12 +661,13 @@ public final class Environment
                                 Map.of(
                                         "presto",
                                         Map.of(
-                                                "configured_connectors", configuredConnectors))));
+                                                "configured_connectors", configuredConnectors,
+                                                "configured_password_authenticators", configuredPasswordAuthenticators))));
             }
             catch (IOException e) {
                 throw new RuntimeException(e);
             }
-            String temptoConfig = "/docker/presto-product-tests/conf/tempto/tempto-configured-connectors.yaml";
+            String temptoConfig = "/docker/presto-product-tests/conf/tempto/tempto-configured-features.yaml";
             testContainer.withCopyFileToContainer(forHostPath(tempFile.getPath()), temptoConfig);
             // add custom tempto config and configured_features to arguments if there are any other groups enabled
             String[] commandParts = testContainer.getCommandParts();

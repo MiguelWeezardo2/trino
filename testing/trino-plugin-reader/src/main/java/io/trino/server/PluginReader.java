@@ -19,7 +19,6 @@ import com.google.common.io.Files;
 import io.airlift.log.Logger;
 import io.trino.spi.Plugin;
 import io.trino.spi.classloader.ThreadContextClassLoader;
-import io.trino.spi.connector.ConnectorFactory;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
@@ -35,7 +34,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Enumeration;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.MissingResourceException;
@@ -51,6 +49,7 @@ import java.util.zip.ZipFile;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
+import static io.trino.metadata.FunctionExtractor.extractFunctions;
 import static java.util.Arrays.asList;
 import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
@@ -88,7 +87,9 @@ public class PluginReader
             }
         }
         Map<String, String> modulesToPlugins = mapModulesToPlugins(rootPom);
-        Map<String, List<String>> pluginsToConnectors = mapPluginsToConnectors(pluginDir);
+        Map<String, Plugin> plugins = loadPlugins(pluginDir).stream()
+                .map(plugin -> new SimpleEntry<>(plugin.getClass().getName(), plugin))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         Stream<Map.Entry<String, String>> modulesStream = requireNonNull(modulesToPlugins).entrySet().stream();
         if (impactedModules.isPresent()) {
             boolean hasNonPluginModules = impactedModules.get().stream().anyMatch(module -> !modulesToPlugins.containsKey(module));
@@ -100,15 +101,34 @@ public class PluginReader
                 modulesStream = modulesStream.filter(entry -> finalImpactedModules.get().contains(entry.getKey()));
             }
         }
+
         modulesStream.forEach(entry -> {
-            if (!pluginsToConnectors.containsKey(entry.getValue())) {
+            if (!plugins.containsKey(entry.getValue())) {
                 log.warn("Plugin without any connectors: %s", entry.getValue());
                 return;
             }
-            pluginsToConnectors.get(entry.getValue())
-                    .forEach(System.out::println);
+            printPluginFeatures(plugins.get(entry.getValue()));
         });
         return 0;
+    }
+
+    private static void printPluginFeatures(Plugin plugin)
+    {
+        plugin.getConnectorFactories().forEach(factory -> System.out.println("connector:" + factory.getName()));
+        plugin.getBlockEncodings().forEach(encoding -> System.out.println("blockEncoding:" + encoding.getName()));
+        plugin.getTypes().forEach(type -> System.out.println(type.getTypeId()));
+        plugin.getParametricTypes().forEach(type -> System.out.println("parametricType:" + type.getName()));
+        plugin.getFunctions().forEach(functionClass -> extractFunctions(functionClass)
+                .forEach(function -> System.out.println("function:" + function.getFunctionMetadata().getSignature())));
+        plugin.getSystemAccessControlFactories().forEach(factory -> System.out.println("systemAccessControl:" + factory.getName()));
+        plugin.getGroupProviderFactories().forEach(factory -> System.out.println("groupProvider:" + factory.getName()));
+        plugin.getPasswordAuthenticatorFactories().forEach(factory -> System.out.println("passwordAuthenticator:" + factory.getName()));
+        plugin.getHeaderAuthenticatorFactories().forEach(factory -> System.out.println("headerAuthenticator:" + factory.getName()));
+        plugin.getCertificateAuthenticatorFactories().forEach(factory -> System.out.println("certificateAuthenticator:" + factory.getName()));
+        plugin.getEventListenerFactories().forEach(factory -> System.out.println("eventListener:" + factory.getName()));
+        plugin.getResourceGroupConfigurationManagerFactories().forEach(factory -> System.out.println("resourceGroupConfigurationManager:" + factory.getName()));
+        plugin.getSessionPropertyConfigurationManagerFactories().forEach(factory -> System.out.println("sessionPropertyConfigurationManager:" + factory.getName()));
+        plugin.getExchangeManagerFactories().forEach(factory -> System.out.println("exchangeManager:" + factory.getName()));
     }
 
     private static Map<String, String> mapModulesToPlugins(File rootPom)
@@ -205,43 +225,29 @@ public class PluginReader
         }
     }
 
-    private static Map<String, List<String>> mapPluginsToConnectors(File path)
+    private static List<Plugin> loadPlugins(File path)
     {
         ServerPluginsProviderConfig config = new ServerPluginsProviderConfig();
         config.setInstalledPluginsDir(path);
         ServerPluginsProvider pluginsProvider = new ServerPluginsProvider(config, directExecutor());
-        HashMap<String, List<String>> connectors = new HashMap<>();
-        pluginsProvider.loadPlugins((plugin, createClassLoader) -> loadPlugin(createClassLoader, connectors), PluginManager::createClassLoader);
-        return connectors;
+        ImmutableList.Builder<Plugin> plugins = new ImmutableList.Builder<>();
+        pluginsProvider.loadPlugins((plugin, createClassLoader) -> loadPlugin(createClassLoader, plugins), PluginManager::createClassLoader);
+        return plugins.build();
     }
 
-    private static void loadPlugin(Supplier<PluginClassLoader> createClassLoader, Map<String, List<String>> connectors)
+    private static void loadPlugin(Supplier<PluginClassLoader> createClassLoader, ImmutableList.Builder<Plugin> plugins)
     {
         PluginClassLoader pluginClassLoader = createClassLoader.get();
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(pluginClassLoader)) {
-            loadServicePlugin(pluginClassLoader, connectors);
+            loadServicePlugin(pluginClassLoader, plugins);
         }
     }
 
-    private static void loadServicePlugin(PluginClassLoader pluginClassLoader, Map<String, List<String>> connectors)
+    private static void loadServicePlugin(PluginClassLoader pluginClassLoader, ImmutableList.Builder<Plugin> plugins)
     {
         ServiceLoader<Plugin> serviceLoader = ServiceLoader.load(Plugin.class, pluginClassLoader);
-        List<Plugin> plugins = ImmutableList.copyOf(serviceLoader);
-        checkState(!plugins.isEmpty(), "No service providers of type %s in the classpath: %s", Plugin.class.getName(), asList(pluginClassLoader.getURLs()));
-
-        for (Plugin plugin : plugins) {
-            connectors.put(plugin.getClass().getName(), getPluginConnectors(plugin));
-        }
-    }
-
-    private static List<String> getPluginConnectors(Plugin plugin)
-    {
-        ImmutableList.Builder<String> connectorNames = ImmutableList.builder();
-
-        for (ConnectorFactory connectorFactory : plugin.getConnectorFactories()) {
-            connectorNames.add(connectorFactory.getName());
-        }
-
-        return connectorNames.build();
+        List<Plugin> loadedPlugins = ImmutableList.copyOf(serviceLoader);
+        checkState(!loadedPlugins.isEmpty(), "No service providers of type %s in the classpath: %s", Plugin.class.getName(), asList(pluginClassLoader.getURLs()));
+        plugins.addAll(loadedPlugins);
     }
 }
