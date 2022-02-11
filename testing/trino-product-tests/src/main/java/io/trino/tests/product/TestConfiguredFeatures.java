@@ -28,16 +28,19 @@ import static io.trino.tests.product.TestGroups.CONFIGURED_FEATURES;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.sql.JDBCType.VARCHAR;
 
+/**
+ * Tests in this class verify that the test environments have been defined correctly,
+ * that is that the Trino features they declare to be using
+ * matches what's enabled in the running Trino server.
+ *
+ * They don't test that these features work correctly in the Trino server itself.
+ */
 public class TestConfiguredFeatures
         extends ProductTest
 {
     @Inject
     @Named("databases.presto.configured_connectors")
     private List<String> configuredConnectors;
-
-    @Inject
-    @Named("databases.presto.configured_password_authenticators")
-    private List<String> configuredPasswordAuthenticators;
 
     @Test(groups = CONFIGURED_FEATURES)
     public void selectConfiguredConnectors()
