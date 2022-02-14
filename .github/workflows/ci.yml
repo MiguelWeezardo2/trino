@@ -46,10 +46,16 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-java@v2
+        if: ${{ !env.ACT }}
         with:
           distribution: 'zulu'
           java-version: ${{ matrix.java-version }}
           cache: 'maven'
+      - uses: actions/setup-java@v2
+        if: ${{ env.ACT }}
+        with:
+          distribution: 'zulu'
+          java-version: ${{ matrix.java-version }}
       - name: Configure Problem Matchers
         run: echo "::add-matcher::.github/problem-matcher.json"
       - name: Maven Checks
@@ -78,10 +84,16 @@ jobs:
       - name: Fetch base ref to find merge-base for GIB
         run: .github/bin/git-fetch-base-ref.sh
       - uses: actions/setup-java@v2
+        if: ${{ !env.ACT }}
         with:
           distribution: 'zulu'
           java-version: 11
           cache: 'maven'
+      - uses: actions/setup-java@v2
+        if: ${{ env.ACT }}
+        with:
+          distribution: 'zulu'
+          java-version: 11
       - name: Configure Problem Matchers
         run: echo "::add-matcher::.github/problem-matcher.json"
       - name: Maven Install
@@ -115,10 +127,16 @@ jobs:
       - name: Fetch base ref to find merge-base for GIB
         run: .github/bin/git-fetch-base-ref.sh
       - uses: actions/setup-java@v2
+        if: ${{ !env.ACT }}
         with:
           distribution: 'zulu'
           java-version: 11
           cache: 'maven'
+      - uses: actions/setup-java@v2
+        if: ${{ env.ACT }}
+        with:
+          distribution: 'zulu'
+          java-version: 11
       - name: Configure Problem Matchers
         run: echo "::add-matcher::.github/problem-matcher.json"
       - name: Maven Install
@@ -175,10 +193,16 @@ jobs:
       - name: Fetch base ref to find merge-base for GIB
         run: .github/bin/git-fetch-base-ref.sh
       - uses: actions/setup-java@v2
+        if: ${{ !env.ACT }}
         with:
           distribution: 'zulu'
           java-version: 11
           cache: 'maven'
+      - uses: actions/setup-java@v2
+        if: ${{ env.ACT }}
+        with:
+          distribution: 'zulu'
+          java-version: 11
       - name: Configure Problem Matchers
         run: echo "::add-matcher::.github/problem-matcher.json"
       - name: Install Hive Module
@@ -291,10 +315,16 @@ jobs:
       - name: Fetch base ref to find merge-base for GIB
         run: .github/bin/git-fetch-base-ref.sh
       - uses: actions/setup-java@v2
+        if: ${{ !env.ACT }}
         with:
           distribution: 'zulu'
           java-version: 11
           cache: 'maven'
+      - uses: actions/setup-java@v2
+        if: ${{ env.ACT }}
+        with:
+          distribution: 'zulu'
+          java-version: 11
       - name: Configure Problem Matchers
         run: echo "::add-matcher::.github/problem-matcher.json"
       - name: Maven Install
@@ -418,10 +448,16 @@ jobs:
       - name: Fetch base ref to find merge-base for GIB
         run: .github/bin/git-fetch-base-ref.sh
       - uses: actions/setup-java@v2
+        if: ${{ !env.ACT }}
         with:
           distribution: 'zulu'
           java-version: 11
           cache: 'maven'
+      - uses: actions/setup-java@v2
+        if: ${{ env.ACT }}
+        with:
+          distribution: 'zulu'
+          java-version: 11
       - name: Configure Problem Matchers
         run: echo "::add-matcher::.github/problem-matcher.json"
       - name: Cleanup node
@@ -495,10 +531,16 @@ jobs:
         run: |
           [ "$GITHUB_REF_NAME" != master ] && git fetch --no-tags --prune --progress --no-recurse-submodules origin "$GITHUB_BASE_REF"
       - uses: actions/setup-java@v2
+        if: ${{ !env.ACT }}
         with:
           distribution: 'zulu'
           java-version: 11
           cache: 'maven'
+      - uses: actions/setup-java@v2
+        if: ${{ env.ACT }}
+        with:
+          distribution: 'zulu'
+          java-version: 11
       - name: Maven Install
         run: |
           export MAVEN_OPTS="${MAVEN_INSTALL_OPTS}"
