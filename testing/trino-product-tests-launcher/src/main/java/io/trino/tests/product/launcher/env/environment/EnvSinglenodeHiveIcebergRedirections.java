@@ -43,7 +43,7 @@ public class EnvSinglenodeHiveIcebergRedirections
     @Override
     public void extendEnvironment(Environment.Builder builder)
     {
-        builder.addConnector("hive", forHostPath(configDir.getPath("hive.properties")));
+        builder.addConnector("hive-hadoop2", forHostPath(configDir.getPath("hive.properties")));
         builder.addConnector("iceberg", forHostPath(configDir.getPath("iceberg.properties")));
     }
 }
