@@ -21,6 +21,8 @@
 
 ## Development
 
+Small change and more
+
 See [DEVELOPMENT](.github/DEVELOPMENT.md) for information about code style,
 development process, and guidelines.
 
